@@ -109,6 +109,7 @@ export default function ImportPage() {
             account_id: acct.id,
             trade_no,
             symbol,
+            source_sheet: sheet,
             instrument: instrument === 'ETF' ? 'ETF' : 'Stock',
             side: 'Long',
             status,
@@ -169,6 +170,7 @@ export default function ImportPage() {
             trade_id,
             account_id: acct.id, // ✅ FIXED: was acct_id (undefined)
             symbol: String(r['Symbol']).toUpperCase(),
+            source_sheet: sheet,
             side,
             quantity: num(r['Quantity']) ?? 0,
             price: num(r['Price']) ?? 0,
@@ -189,6 +191,49 @@ export default function ImportPage() {
       }
 
       setMsg(`Imported ${byTrade.size} trades and ${rows.length} rows into Supabase.`)
+    } catch (e: any) {
+      setMsg(e.message ?? String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteSheetImport() {
+    if (!sheet) return
+    if (!confirm(`Delete ALL trades/executions imported from sheet "${sheet}"? This cannot be undone.`)) return
+
+    setBusy(true)
+    setMsg('')
+    try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not signed in')
+      const acct = await ensureDefaultAccount(user.id)
+
+      // Find all trades imported from this sheet for this user/account.
+      const { data: tradeRows, error: tradeSelErr } = await supabase
+        .from('trades')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('account_id', acct.id)
+        .eq('source_sheet', sheet)
+
+      if (tradeSelErr) throw tradeSelErr
+      const tradeIds = (tradeRows ?? []).map((t: any) => t.id).filter(Boolean)
+      if (!tradeIds.length) {
+        setMsg(`No trades found for source_sheet = "${sheet}".`)
+        return
+      }
+
+      // Delete executions first (FK dependency)
+      const { error: delExecErr } = await supabase.from('executions').delete().in('trade_id', tradeIds)
+      if (delExecErr) throw delExecErr
+
+      const { error: delTradeErr } = await supabase.from('trades').delete().in('id', tradeIds)
+      if (delTradeErr) throw delTradeErr
+
+      setMsg(`Deleted ${tradeIds.length} trades (and their executions) from sheet "${sheet}".`)
     } catch (e: any) {
       setMsg(e.message ?? String(e))
     } finally {
@@ -221,6 +266,21 @@ export default function ImportPage() {
             await loadFile(f)
           }}
         />
+
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+          <button className="btn" onClick={importIntoSupabase} disabled={busy || !rows.length}>
+            {busy ? 'Working…' : 'Import selected sheet'}
+          </button>
+
+          <button
+            className="btn"
+            onClick={deleteSheetImport}
+            disabled={busy || !sheet}
+            style={{ borderColor: '#b91c1c', color: '#b91c1c' }}
+          >
+            Delete this sheet import
+          </button>
+        </div>
 
         {workbook && (
           <div style={{ marginTop: 12 }}>
