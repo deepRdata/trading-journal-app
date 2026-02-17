@@ -17,6 +17,7 @@ export default function ImportPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [msg, setMsg] = useState<string>('')
   const [busy, setBusy] = useState(false)
+  const [lastSelectedSheet, setLastSelectedSheet] = useState<string>("");
 
   const summary = useMemo(() => {
     if (!rows.length) return null
@@ -199,8 +200,13 @@ export default function ImportPage() {
   }
 
   async function deleteSheetImport() {
-    if (!sheet) return
-    if (!confirm(`Delete ALL trades/executions imported from sheet "${sheet}"? This cannot be undone.`)) return
+    const targetSheet = sheet || lastSelectedSheet
+    if (!targetSheet) {
+      alert('Pick a sheet to delete.')
+      return
+    }
+
+    if (!confirm(`Delete ALL trades/executions imported from sheet "${targetSheet}"? This cannot be undone.`)) return
 
     setBusy(true)
     setMsg('')
@@ -217,12 +223,12 @@ export default function ImportPage() {
         .select('id')
         .eq('user_id', user.id)
         .eq('account_id', acct.id)
-        .eq('source_sheet', sheet)
+        .eq('source_sheet', targetSheet)
 
       if (tradeSelErr) throw tradeSelErr
       const tradeIds = (tradeRows ?? []).map((t: any) => t.id).filter(Boolean)
       if (!tradeIds.length) {
-        setMsg(`No trades found for source_sheet = "${sheet}".`)
+        setMsg(`No trades found for source_sheet = "${targetSheet}".`)
         return
       }
 
@@ -233,13 +239,14 @@ export default function ImportPage() {
       const { error: delTradeErr } = await supabase.from('trades').delete().in('id', tradeIds)
       if (delTradeErr) throw delTradeErr
 
-      setMsg(`Deleted ${tradeIds.length} trades (and their executions) from sheet "${sheet}".`)
+      setMsg(`Deleted ${tradeIds.length} trades (and their executions) from sheet "${targetSheet}".`)
     } catch (e: any) {
       setMsg(e.message ?? String(e))
     } finally {
       setBusy(false)
     }
   }
+
 
   return (
     <div className="container">
@@ -275,7 +282,7 @@ export default function ImportPage() {
           <button
             className="btn"
             onClick={deleteSheetImport}
-            disabled={busy || !sheet}
+            disabled={busy || !(sheet || lastSelectedSheet)}
             style={{ borderColor: '#b91c1c', color: '#b91c1c' }}
           >
             Delete this sheet import
@@ -287,10 +294,10 @@ export default function ImportPage() {
             <div className="small">Sheet</div>
             <select
               value={sheet}
-              onChange={e => {
-                const name = e.target.value
-                setSheet(name)
-                loadSheet(workbook, name)
+              onChange={(e) => {
+                const v = e.target.value;
+                setSheet(v);
+                setLastSelectedSheet(v);
               }}
             >
               {sheetNames.map(s => (
