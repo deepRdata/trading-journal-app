@@ -1,77 +1,80 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { supabase } from '@/lib/supabaseClient'
 
 export default function CallbackClient() {
     const router = useRouter()
     const sp = useSearchParams()
 
-    // Pull code from query string (Schwab uses `code`)
-    const code = useMemo(() => {
-        return (
-            sp.get('code') ??
-            sp.get('authCode') ??
-            sp.get('authorization_code') ??
-            null
-        )
-    }, [sp])
+    // Schwab should send `code`, but we allow a few fallbacks just in case.
+    const code =
+        sp.get('code') ??
+        sp.get('authCode') ??
+        sp.get('authorization_code')
 
     const error = sp.get('error')
     const errorDesc = sp.get('error_description')
 
-    const [msg, setMsg] = useState<string>('Working...')
+    const [msg, setMsg] = useState('')
 
     useEffect(() => {
-        let cancelled = false
-
-            ; (async () => {
+        ; (async () => {
+            try {
                 if (error) {
-                    if (!cancelled) setMsg(`${error}${errorDesc ? `: ${errorDesc}` : ''}`)
+                    setMsg(`${error}${errorDesc ? `: ${errorDesc}` : ''}`)
                     return
                 }
 
                 if (!code) {
-                    if (!cancelled) setMsg('Missing code')
+                    setMsg('Missing code')
                     return
                 }
 
-                if (!cancelled) setMsg('Exchanging code...')
+                setMsg('Exchanging code...')
 
-                try {
-                    // Your API route expects POST (405 happens if you GET it)
-                    const res = await fetch('/api/schwab/exchange', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        cache: 'no-store',
-                        body: JSON.stringify({ code }),
-                    })
+                // ✅ Get Supabase session (we need the access_token to auth the API route)
+                const { data: sessionData, error: sessErr } = await supabase.auth.getSession()
+                if (sessErr) throw sessErr
 
-                    if (!res.ok) {
-                        const txt = await res.text().catch(() => '')
-                        if (!cancelled) {
-                            setMsg(`Exchange failed (${res.status})${txt ? `: ${txt}` : ''}`)
-                        }
-                        return
-                    }
-
-                    if (!cancelled) setMsg('Connected! Returning to Broker...')
-                    router.replace('/broker')
-                } catch (e: any) {
-                    if (!cancelled) setMsg(e?.message ?? String(e))
+                const session = sessionData.session
+                if (!session?.access_token) {
+                    setMsg('Not signed in to the app. Go back to Broker and sign in, then try Connect again.')
+                    return
                 }
-            })()
 
-        return () => {
-            cancelled = true
-        }
+                // IMPORTANT: Call exchange with POST (your route.ts is POST).
+                const res = await fetch('/api/schwab/exchange', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // ✅ This is what your server route is complaining about
+                        'Authorization': `Bearer ${session.access_token}`,
+                    },
+                    cache: 'no-store',
+                    body: JSON.stringify({ code }),
+                })
+
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => '')
+                    setMsg(`Exchange failed (${res.status})${txt ? `: ${txt}` : ''}`)
+                    return
+                }
+
+                setMsg('Connected! Returning to Broker...')
+                router.replace('/broker')
+            } catch (e: any) {
+                setMsg(e?.message ?? String(e))
+            }
+        })()
     }, [code, error, errorDesc, router])
 
     return (
         <div style={{ maxWidth: 720, margin: '48px auto', padding: 16 }}>
             <h1 style={{ fontSize: 28, fontWeight: 700 }}>Schwab connection</h1>
-            <p style={{ marginTop: 12 }}>{msg}</p>
+            <p style={{ marginTop: 12 }}>{msg || 'Working...'}</p>
 
             <div style={{ marginTop: 16 }}>
                 <Link href="/broker">Back to Broker</Link>
