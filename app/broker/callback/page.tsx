@@ -2,44 +2,58 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
+import { useSearchParams } from 'next/navigation'
 
-export default function SchwabCallbackPage({ searchParams }: { searchParams: { code?: string } }) {
-  const [msg, setMsg] = useState('Connecting…')
+export default function BrokerCallbackPage() {
+  const sp = useSearchParams()
+
+  // Schwab should send `code`, but we allow a few fallbacks just in case.
+  const code =
+    sp.get('code') ??
+    sp.get('authCode') ??
+    sp.get('authorization_code')
+
+  const error = sp.get('error')
+  const errorDesc = sp.get('error_description')
+
+  const [msg, setMsg] = useState<string>('')
 
   useEffect(() => {
-    (async () => {
-      try {
-        const code = searchParams.code
-        if (!code) throw new Error('Missing code')
-        const account_id = localStorage.getItem('schwab_account_id')
-        if (!account_id) throw new Error('Missing local account id (go back to Broker page and click Connect again)')
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) throw new Error('Not signed in')
-
-        const resp = await fetch('/api/schwab/exchange', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`
-          },
-          body: JSON.stringify({ code, account_id })
-        })
-        const j = await resp.json()
-        if (!resp.ok) throw new Error(j.error ?? 'Exchange failed')
-
-        setMsg('Connected! You can close this page.')
-      } catch (e: any) {
-        setMsg(e.message ?? String(e))
+    ; (async () => {
+      if (error) {
+        setMsg(`${error}${errorDesc ? `: ${errorDesc}` : ''}`)
+        return
       }
+
+      if (!code) {
+        setMsg('Missing code')
+        return
+      }
+
+      setMsg('Exchanging code…')
+
+      // NOTE: If your /api/schwab/exchange route expects POST, change method to 'POST'.
+      const res = await fetch(`/api/schwab/exchange?code=${encodeURIComponent(code)}`, {
+        method: 'GET',
+        cache: 'no-store',
+      })
+
+      const text = await res.text()
+
+      if (!res.ok) {
+        setMsg(`Exchange failed (${res.status}): ${text}`)
+        return
+      }
+
+      setMsg('Connected! Go back to Broker Sync.')
     })()
-  }, [searchParams.code])
+  }, [code, error, errorDesc])
 
   return (
-    <div className="container">
-      <div className="card">
-        <h2 style={{marginTop:0}}>Schwab connection</h2>
-        <p className="small">{msg}</p>
+    <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 700 }}>Schwab connection</h1>
+      <p style={{ marginTop: 12 }}>{msg || 'Working…'}</p>
+      <div style={{ marginTop: 12 }}>
         <Link href="/broker">Back to Broker</Link>
       </div>
     </div>
