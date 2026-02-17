@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-export default function BrokerCallbackPage() {
+function CallbackInner() {
   const sp = useSearchParams()
 
   // Schwab should send `code`, but we allow a few fallbacks just in case.
@@ -30,32 +30,36 @@ export default function BrokerCallbackPage() {
         return
       }
 
-      setMsg('Exchanging code…')
-
-      // NOTE: If your /api/schwab/exchange route expects POST, change method to 'POST'.
+      setMsg('Exchanging code...')
       const res = await fetch(`/api/schwab/exchange?code=${encodeURIComponent(code)}`, {
         method: 'GET',
         cache: 'no-store',
       })
-
-      const text = await res.text()
-
+      const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setMsg(`Exchange failed (${res.status}): ${text}`)
+        setMsg(json?.error ?? `Exchange failed (${res.status})`)
         return
       }
 
-      setMsg('Connected! Go back to Broker Sync.')
+      setMsg('Connected! You can go back to Broker Sync.')
     })()
   }, [code, error, errorDesc])
 
   return (
-    <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700 }}>Schwab connection</h1>
-      <p style={{ marginTop: 12 }}>{msg || 'Working…'}</p>
+    <div style={{ maxWidth: 720, margin: '40px auto', padding: 24 }}>
+      <h1>Schwab connection</h1>
+      <div style={{ marginTop: 12 }}>{msg}</div>
       <div style={{ marginTop: 12 }}>
         <Link href="/broker">Back to Broker</Link>
       </div>
     </div>
+  )
+}
+
+export default function BrokerCallbackPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+      <CallbackInner />
+    </Suspense>
   )
 }
